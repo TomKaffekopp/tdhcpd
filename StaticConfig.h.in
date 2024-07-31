@@ -13,6 +13,7 @@
 
 namespace StaticConfig
 {
+constexpr auto* Version = "@TDHCPD_VERSION@";
 constexpr auto* ConfigFile = "@TDHCPD_Config_File@";
 constexpr std::uint16_t ServerPort = @TDHCPD_Server_Port@;
 constexpr std::uint16_t ClientPort = @TDHCPD_Client_Port@;

@@ -55,6 +55,22 @@ void daemonize()
         std::exit(0);
 }
 
+void writePidFile()
+{
+    const auto& pidFileName = Configuration::GetPidFileName();
+    if (pidFileName.empty())
+        return;
+
+    std::ofstream ofs(pidFileName);
+    if (!ofs.is_open())
+    {
+        Log::Warning("Couldn't open PID file for writing: {}", pidFileName);
+        return;
+    }
+
+    ofs << std::to_string(getpid());
+}
+
 std::unordered_map<std::string, Network> createNetworks(std::span<std::string> interfaces)
 {
     std::unordered_map<std::string, Network> network;
@@ -69,7 +85,7 @@ std::unordered_map<std::string, Network> createNetworks(std::span<std::string> i
     return network;
 }
 
-void LogToSyslog(Log::Level level, std::string_view text)
+void logToSyslog(Log::Level level, std::string_view text)
 {
     static auto levelToSyslogLevel = [](Log::Level level) -> int
     {
@@ -91,7 +107,7 @@ void LogToSyslog(Log::Level level, std::string_view text)
     syslog(levelToSyslogLevel(level), "%s", text.data());
 }
 
-void LogToFile(Log::Level level, std::string_view text)
+void logToFile(Log::Level level, std::string_view text)
 {
     auto now = std::time(nullptr);
     std::string timestamp = std::ctime(&now);
@@ -103,7 +119,7 @@ void LogToFile(Log::Level level, std::string_view text)
 
 void setupSyslog()
 {
-    Log::SetLogFunction(&LogToSyslog);
+    Log::SetLogFunction(&logToSyslog);
     openlog("TDHCPD", 0, LOG_DAEMON);
 }
 
@@ -116,7 +132,7 @@ void setupFilelog()
         Log::Critical("Couldn't open {} for logging, using console", Configuration::GetLogFileName());
     }
 
-    Log::SetLogFunction(&LogToFile);
+    Log::SetLogFunction(&logToFile);
 }
 
 void setupLogging()
@@ -163,10 +179,7 @@ int main()
 
     setupLogging();
 
-    if (!Configuration::GetPidFileName().empty())
-    {
-        /* Write pid file */
-    }
+    writePidFile();
 
     /* SIGTERM or SIGCHLD */
     {
@@ -182,9 +195,11 @@ int main()
         sigaction(SIGINT, &sighandler, nullptr);
     }
 
-    auto pid = getpid();
-
-    Log::Info("Starting TDHCPD[{}], server serverPort {}, clientPort {}", pid, StaticConfig::ServerPort, StaticConfig::ClientPort);
+    Log::Info("Starting TDHCPD[{}] version {}, serverPort {}, clientPort {}",
+              getpid(),
+              StaticConfig::Version,
+              StaticConfig::ServerPort,
+              StaticConfig::ClientPort);
 
     auto interfaces = Configuration::GetConfiguredInterfaces();
 
@@ -209,6 +224,9 @@ int main()
     sockets.clear();
 
     closeLogging();
+
+    if (!Configuration::GetPidFileName().empty())
+        unlink(Configuration::GetPidFileName().c_str());
 
     Log::Info("Thank you for playing.");
 

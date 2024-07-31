@@ -6,6 +6,15 @@
 cmake_minimum_required(VERSION 3.28)
 project(tdhcpd)
 
+set(TDHCPD_VERSION_NUMBER "1.0.0")
+set(TDHCPD_VERSION_SUFFIX "")
+
+if ("${TDHCPD_VERSION_SUFFIX}" STREQUAL "")
+    set(TDHCPD_VERSION "${TDHCPD_VERSION_NUMBER}")
+else()
+    set(TDHCPD_VERSION "${TDHCPD_VERSION_NUMBER}-${TDHCPD_VERSION_SUFFIX}")
+endif()
+
 include(CMake/config_h_warning.cmake)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -20,6 +29,7 @@ option(BUILD_LEASEVIEWER "Build the lease viewer program" ON)
 
 configure_file(StaticConfig.h.in ${CMAKE_BINARY_DIR}/generated/StaticConfig.h @ONLY)
 
+message("-- TDHCPD v${TDHCPD_VERSION}")
 message("-- TDHCPD Config path: ${TDHCPD_Config_File}")
 message("-- DHCP server port: ${TDHCPD_Server_Port}")
 message("-- DHCP client port: ${TDHCPD_Client_Port}")
