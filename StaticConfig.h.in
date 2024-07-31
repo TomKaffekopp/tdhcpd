@@ -1,0 +1,19 @@
+/*
+ * TDHCPD - A Dynamic Host Configuration Protocol (DHCP) server
+ * Copyright (C) 2024  Tom-Andre Barstad.
+ * This software is licensed under the Software Attribution License.
+ * See LICENSE for more information.
+*/
+
+#pragma once
+
+#include <cstdint>
+
+@config_h_warning@
+
+namespace StaticConfig
+{
+constexpr auto* ConfigFile = "@TDHCPD_Config_File@";
+constexpr std::uint16_t ServerPort = @TDHCPD_Server_Port@;
+constexpr std::uint16_t ClientPort = @TDHCPD_Client_Port@;
+}

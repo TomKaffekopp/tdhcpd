@@ -1,0 +1,48 @@
+TDHCPD - A Dynamic Host Configuration Protocol (DHCP) server
+Copyright (C) 2024  Tom-Andre Barstad.
+This software is licensed under the Software Attribution License.
+See LICENSE for more information.
+
+This software is result of experimenting with setting up my own home router.
+I wanted to write my own key software that runs on it and this is one of them.
+
+TDHCPD was written to run on Linux, but I believe it should be a small effort
+to port it to other systems.
+
+There are currently no pre-built packages for Your Favourite Linux Distro.
+However, this software was written without any dependencies besides C++20.
+That should make it simple to build and easy to install.
+
+COMPILING
+
+I have tested building with GCC 13.3.1 and Clang 17.0.6 on Gentoo.
+CMake version 3.28 or greater is needed.
+
+Inside the source folder, create a folder called "build".
+Run "cmake" without any particular options from the build folder (ie. cmake ..)
+Finally run "make" and you should have a binary called "tdhcpd".
+
+1. mkdir build
+2. cd build
+3. cmake ..
+4. make -j8
+
+
+INSTALLING
+
+1. Move "tdhcpd" binary to for example /usr/local/sbin/tdhcpd.
+
+2. Copy the example configuration tdhcpd.conf to /etc/tdhcpd.conf.
+
+3. Create folder /var/tdhcpd - Here a persistent lease file will be saved.
+   This is however configurable, under /etc/tdhcpd.conf.
+
+4. Set up a service script to launch tdhcpd on boot (you're on your own here.)
+   If you run OpenRC as init system, (f.ex. Gentoo) under the folder "openrc"
+   in the source code you will find a service script for OpenRC.
+
+
+CONFIGURING
+
+Edit /etc/tdhcpd.conf and make it fit your network configuration.
+If you don't have any preference, you only need to adjust the "interface" name.
