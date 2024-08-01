@@ -171,17 +171,13 @@ int main()
     if (!Configuration::GetPidFileName().empty())
     {
         daemonize();
-
-        struct sigaction sighandler{};
-        sighandler.sa_handler = &sigtermFn;
-        sigaction(SIGCHLD, &sighandler, nullptr);
     }
 
     setupLogging();
 
     writePidFile();
 
-    /* SIGTERM or SIGCHLD */
+    /* SIGTERM */
     {
         struct sigaction sighandler{};
         sighandler.sa_handler = &sigtermFn;

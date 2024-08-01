@@ -46,6 +46,8 @@ struct BootpSocketPrivate
         addr.sin_addr.s_addr = htonl(target);
         addr.sin_port = htons(clientPort);
 
+        Log::Debug("Sending response to {} on {} bytes", convertIpAddress(target), data.size());
+
         auto bytesSent = sendto(sockfd, data.data(), data.size(), 0, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
         if (bytesSent == 0)
         {

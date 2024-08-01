@@ -49,6 +49,7 @@ void addArpEntry(std::string_view iface, std::string_view ip, std::string_view h
      * TODO use Linux's own API for doing this instead of std::system.
     */
     auto cmd = std::format("{} -i {} -s {} {}", ArpProgram, iface, ip, hw);
+    Log::Debug("Executing: {}", cmd);
     if (int ret = std::system(cmd.c_str()) != 0)
     {
         Log::Critical("Failed to execute ({}): {}", ret, cmd);
