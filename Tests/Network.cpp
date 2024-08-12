@@ -116,6 +116,106 @@ TEST(AddressPoolTests, PreferredFromDifferentNetwork_2)
     EXPECT_FALSE(ok);
 }
 
+TEST(AddressPoolTests, SmallNetwork_30)
+{
+    Network net;
+
+    /*
+     * Network: 192.168.123.108/30
+     * Usable addresses:
+     * - 192.168.123.109 (router's)
+     * - 192.168.123.110 (dhcp)
+     * Broadcast: 192.168.123.111
+    */
+
+    net.setNetworkSpace(concatenateIpAddress(192, 168, 123, 108));
+    net.setNetworkSize(30);
+
+    net.setRouterAddress(concatenateIpAddress(192, 168, 123, 109));
+    net.setDhcpServerIdentifier(concatenateIpAddress(192, 168, 123, 109));
+
+    net.setDhcpRange(concatenateIpAddress(192, 168, 123, 110), concatenateIpAddress(192, 168, 123, 110));
+
+    EXPECT_EQ(concatenateIpAddress(192, 168, 123, 111), net.getBroadcastAddress());
+
+    auto ip = net.getAvailableAddress(100);
+    EXPECT_EQ(concatenateIpAddress(192, 168, 123, 110), ip);
+
+    auto ok = net.reserveAddress(100, ip);
+    EXPECT_TRUE(ok);
+
+    auto ip2 = net.getAvailableAddress(101);
+    EXPECT_EQ(0, ip2); // pool exhausted
+}
+
+TEST(AddressPoolTests, SmallNetwork_29)
+{
+    Network net;
+
+    /*
+     * Network: 192.168.123.112/29
+     * Usable addresses:
+     * - 192.168.123.113 (router's)
+     * - 192.168.123.114..118 (dhcp)
+     * Broadcast: 192.168.123.119
+    */
+
+    net.setNetworkSpace(concatenateIpAddress(192, 168, 123, 112));
+    net.setNetworkSize(29);
+
+    net.setRouterAddress(concatenateIpAddress(192, 168, 123, 113));
+    net.setDhcpServerIdentifier(concatenateIpAddress(192, 168, 123, 113));
+
+    net.setDhcpRange(concatenateIpAddress(192, 168, 123, 114), concatenateIpAddress(192, 168, 123, 118));
+
+    EXPECT_EQ(concatenateIpAddress(192, 168, 123, 119), net.getBroadcastAddress());
+
+
+    /* reserve 114 */
+    auto ip_1 = net.getAvailableAddress(100);
+    EXPECT_EQ(concatenateIpAddress(192, 168, 123, 114), ip_1);
+
+    auto ok_1 = net.reserveAddress(100, ip_1);
+    EXPECT_TRUE(ok_1);
+
+
+    /* reserve 115 */
+    auto ip_2 = net.getAvailableAddress(101);
+    EXPECT_EQ(concatenateIpAddress(192, 168, 123, 115), ip_2);
+
+    auto ok_2 = net.reserveAddress(101, ip_2);
+    EXPECT_TRUE(ok_2);
+
+
+    /* reserve 116 */
+    auto ip_3 = net.getAvailableAddress(102);
+    EXPECT_EQ(concatenateIpAddress(192, 168, 123, 116), ip_3);
+
+    auto ok_3 = net.reserveAddress(102, ip_3);
+    EXPECT_TRUE(ok_3);
+
+
+    /* reserve 117 */
+    auto ip_4 = net.getAvailableAddress(104);
+    EXPECT_EQ(concatenateIpAddress(192, 168, 123, 117), ip_4);
+
+    auto ok_4 = net.reserveAddress(103, ip_4);
+    EXPECT_TRUE(ok_4);
+
+
+    /* reserve 118 */
+    auto ip_5 = net.getAvailableAddress(104);
+    EXPECT_EQ(concatenateIpAddress(192, 168, 123, 118), ip_5);
+
+    auto ok_5 = net.reserveAddress(104, ip_5);
+    EXPECT_TRUE(ok_5);
+
+
+    /* exhausted */
+    auto ip_6 = net.getAvailableAddress(105);
+    EXPECT_EQ(0, ip_6);
+}
+
 TEST(AddressPoolTests, LeaseTime_WithoutPreferred_DifferentHardware)
 {
     /* Tests with different hardware addresses, without preferred address */
