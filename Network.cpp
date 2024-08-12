@@ -90,7 +90,7 @@ void Network::setDhcpRange(std::uint32_t first, std::uint32_t last)
     m_dhcpLast = last;
 }
 
-void Network::setLeaseTime(std::uint32_t leaseTimeSeconds)
+void Network::setLeaseDuration(std::uint32_t leaseTimeSeconds)
 {
     m_leaseTime = leaseTimeSeconds;
 }
@@ -142,10 +142,20 @@ std::uint32_t Network::getAvailableAddress(std::uint64_t hardwareAddress, std::u
 {
     std::lock_guard lockGuard(m_leasesMutex);
 
+    /* Preferred IP is specified, check if it's allowed and if there's any expired lease on it. */
     /* Check if preferred IP is allowed - within the network and not the first and last address. */
-    if (preferredIpAddress != 0 && !isIpAllowed(preferredIpAddress))
+    if (preferredIpAddress != 0)
     {
-        preferredIpAddress = 0;
+        if (!isIpAllowed(preferredIpAddress))
+        {
+            preferredIpAddress = 0;
+        }
+        else
+        {
+            const auto& lease = getLease(preferredIpAddress);
+            if (isLeaseEntryValid(lease) && isLeaseExpired(lease))
+                removeLease(preferredIpAddress);
+        }
     }
 
     /*

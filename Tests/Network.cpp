@@ -88,18 +88,46 @@ TEST(AddressPoolTests, ReuseFromSameHardwareAddress)
     EXPECT_EQ(adr1, adr2);
 }
 
-TEST(AddressPoolTests, LeaseTime_1)
+TEST(AddressPoolTests, PreferredFromDifferentNetwork_1)
 {
-    /* Tests with different hardware addresses */
+    Network net;
+
+    const auto preferred = concatenateIpAddress(10, 0, 0, 10);
+    const auto actual = concatenateIpAddress(192, 168, 200, 100);
+
+    auto adr1 = net.getAvailableAddress(100, preferred);
+    EXPECT_EQ(actual, adr1);
+
+    auto ok = net.reserveAddress(100, preferred);
+    EXPECT_FALSE(ok);
+}
+
+TEST(AddressPoolTests, PreferredFromDifferentNetwork_2)
+{
+    Network net;
+
+    const auto preferred = concatenateIpAddress(192, 168, 1, 2);
+    const auto actual = concatenateIpAddress(192, 168, 200, 100);
+
+    auto adr1 = net.getAvailableAddress(100, preferred);
+    EXPECT_EQ(actual, adr1);
+
+    auto ok = net.reserveAddress(100, preferred);
+    EXPECT_FALSE(ok);
+}
+
+TEST(AddressPoolTests, LeaseTime_WithoutPreferred_DifferentHardware)
+{
+    /* Tests with different hardware addresses, without preferred address */
 
     Network net;
-    net.setLeaseTime(2);
+    net.setLeaseDuration(0);
 
     auto adr1 = net.getAvailableAddress(200);
     net.reserveAddress(200, adr1);
 
     // Wait for expiry
-    std::this_thread::sleep_for(std::chrono::seconds(3));
+    std::this_thread::sleep_for(std::chrono::seconds(1));
 
     auto adr2 = net.getAvailableAddress(201);
     net.reserveAddress(201, adr2);
@@ -107,21 +135,67 @@ TEST(AddressPoolTests, LeaseTime_1)
     EXPECT_EQ(adr1, adr2);
 }
 
-TEST(AddressPoolTests, LeaseTime_2)
+TEST(AddressPoolTests, LeaseTime_WithoutPreferred_SameHardware)
 {
-    /* Tests with same hardware address */
+    /* Tests with same hardware address, with preferred address */
 
     Network net;
-    net.setLeaseTime(2);
+    net.setLeaseDuration(0);
 
     auto adr1 = net.getAvailableAddress(300);
     net.reserveAddress(300, adr1);
 
     // Wait for expiry
-    std::this_thread::sleep_for(std::chrono::seconds(3));
+    std::this_thread::sleep_for(std::chrono::seconds(1));
 
     auto adr2 = net.getAvailableAddress(300);
     net.reserveAddress(300, adr2);
 
     EXPECT_EQ(adr1, adr2);
+}
+
+TEST(AddressPoolTests, LeaseTime_WithPreferred_DifferentHardware)
+{
+    /* Tests with different hardware addresses, with preferred address */
+
+    Network net;
+    net.setLeaseDuration(0);
+
+    const auto preferred = concatenateIpAddress(192, 168, 200, 123);
+
+    auto adr1 = net.getAvailableAddress(200, preferred);
+    EXPECT_EQ(preferred, adr1);
+
+    net.reserveAddress(200, adr1);
+
+    // Wait for expiry
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+
+    auto adr2 = net.getAvailableAddress(201, preferred);
+    EXPECT_EQ(preferred, adr2);
+
+    net.reserveAddress(201, adr2);
+}
+
+TEST(AddressPoolTests, LeaseTime_WithPreferred_SameHardware)
+{
+    /* Tests with same hardware address, with preferred address */
+
+    Network net;
+    net.setLeaseDuration(0);
+
+    const auto preferred = concatenateIpAddress(192, 168, 200, 123);
+
+    auto adr1 = net.getAvailableAddress(300, preferred);
+    EXPECT_EQ(preferred, adr1);
+
+    net.reserveAddress(300, adr1);
+
+    // Wait for expiry
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+
+    auto adr2 = net.getAvailableAddress(300, preferred);
+    EXPECT_EQ(preferred, adr1);
+
+    net.reserveAddress(300, adr2);
 }

@@ -44,7 +44,7 @@ public:
 
     void setDhcpRange(std::uint32_t first, std::uint32_t last);
 
-    void setLeaseTime(std::uint32_t leaseTimeSeconds);
+    void setLeaseDuration(std::uint32_t leaseTimeSeconds);
 
     std::uint32_t getBroadcastAddress() const;
 
