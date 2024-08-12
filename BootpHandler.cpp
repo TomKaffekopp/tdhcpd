@@ -105,58 +105,107 @@ std::uint32_t getRequestedIpAddress(const Request& request)
 
 void provideParameterList(const Network& network, const Request& request, BOOTP& offer)
 {
-    auto& offerMessageType = offer.options[Option_MessageType];
-    offerMessageType = std::make_unique<DHCPMessageTypeBOOTPOption>(DHCP_Offer);
+    /* DHCP Offer */
+    auto& offerMessageTypeOption = offer.options[Option_MessageType];
+    offerMessageTypeOption = std::make_unique<DHCPMessageTypeBOOTPOption>(DHCP_Offer);
 
-    auto& serverIdentifier = offer.options[Option_ServerIdentifier];
-    serverIdentifier = std::make_unique<IntegerBOOTPOption<std::uint32_t>>(network.getDhcpServerIdentifier());
+    /*
+     * It appears that even though all the following are _options_, they appear to be _required_ to form a "valid" DHCP
+     * response. Well-made clients should ask for these in the options request, but for example Sony's PS4 appear to
+     * not provide anything useful in the options request and simply assumes these to appear *magically*. So here goes:
+    */
 
-    auto& ipLeaseTime = offer.options[Option_IPLeaseTime];
-    ipLeaseTime = std::make_unique<IntegerBOOTPOption<std::uint32_t>>(network.getLeaseTime());
+    /* Server identifer */
+    auto& serverIdentifierOption = offer.options[Option_ServerIdentifier];
+    serverIdentifierOption = std::make_unique<IntegerBOOTPOption<std::uint32_t>>(network.getDhcpServerIdentifier());
+
+    /* IP lease duration / time */
+    auto& ipLeaseTimeOption = offer.options[Option_IPLeaseTime];
+    ipLeaseTimeOption = std::make_unique<IntegerBOOTPOption<std::uint32_t>>(network.getLeaseTime());
+
+    /* Subnet mask */
+    std::uint32_t subnetMask = (~0 << (32 - network.getNetworkSize()));
+    auto& subnetMaskOption = offer.options[Option_SubnetMask];
+    std::vector<std::uint32_t> subnetIpList = { subnetMask };
+    subnetMaskOption = std::make_unique<IpListBOOTPOption>(std::move(subnetIpList));
+
+    /* Router's IP */
+    auto& routersIpOption = offer.options[Option_Router];
+    std::vector<std::uint32_t> routersIpList = {network.getRouterAddress() };
+    routersIpOption = std::make_unique<IpListBOOTPOption>(std::move(routersIpList));
+
+    /* DNS servers */
+    auto& dnsOption = offer.options[Option_DomainNameServer];
+    auto dnsIpList = network.getDnsServers();
+    dnsOption = std::make_unique<IpListBOOTPOption>(std::move(dnsIpList));
+
+    /* Broadcast */
+    std::uint32_t broadcastAddress = network.getBroadcastAddress();
+    auto& broadcastAddressOption = offer.options[Option_BroadcastAddress];
+    std::vector<std::uint32_t> broadcastAddressIpList = { broadcastAddress };
+    broadcastAddressOption = std::make_unique<IpListBOOTPOption>(std::move(broadcastAddressIpList));
+
+    std::string optionslog;
 
     auto parameterList = getParameterList(request);
     for (auto parameter : parameterList)
     {
         switch (parameter)
         {
+            case Option_Pad:
+                break; // Don't care.
+
             case Option_SubnetMask:
-            {
-                std::uint32_t mask = (~0 << (32 - network.getNetworkSize()));
-                auto& option = offer.options[Option_SubnetMask];
-                std::vector<std::uint32_t> ipList = { mask };
-                option = std::make_unique<IpListBOOTPOption>(std::move(ipList));
+                optionslog += "1/SubnetMask, ";
                 break;
-            }
 
             case Option_Router:
-            {
-                auto& option = offer.options[Option_Router];
-                std::vector<std::uint32_t> ipList = {network.getRouterAddress() };
-                option = std::make_unique<IpListBOOTPOption>(std::move(ipList));
+                optionslog += "3/Routers, ";
                 break;
-            }
 
             case Option_DomainNameServer:
-            {
-                auto& option = offer.options[Option_DomainNameServer];
-                auto ipList = network.getDnsServers();
-                option = std::make_unique<IpListBOOTPOption>(std::move(ipList));
+                optionslog += "6/DNS, ";
                 break;
-            }
 
             case Option_BroadcastAddress:
-            {
-                std::uint32_t broadcast = network.getBroadcastAddress();
-                auto& option = offer.options[Option_BroadcastAddress];
-                std::vector<std::uint32_t> ipList = { broadcast };
-                option = std::make_unique<IpListBOOTPOption>(std::move(ipList));
+                optionslog += "28/Broadcast, ";
                 break;
-            }
+
+            case Option_RequestedIp:
+                optionslog += "50/RequestedIp, ";
+                break;
+
+            case Option_IPLeaseTime:
+                optionslog += "51/IpLeaseTime, ";
+                break;
+
+            case Option_ServerIdentifier:
+                optionslog += "54/ServerIdentifier, ";
+                break;
+
+            case Option_End:
+                break; // Don't care.
 
             default:
+                optionslog += std::format("{}, ", static_cast<int>(parameter));
                 break; // unsupported option
         }
     }
+
+    if (optionslog.empty())
+    {
+        optionslog = "[Empty or unspecified]";
+    }
+    else
+    {
+        /* For the comma and space. */
+        optionslog.pop_back();
+        optionslog.pop_back();
+    }
+
+    Log::Debug("Parameter request from {} - {}",
+               convertHardwareAddress(request.bootp.chaddr),
+               optionslog);
 }
 
 void handleDhcpDiscover(const Request& request)
