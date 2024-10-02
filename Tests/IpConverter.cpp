@@ -9,17 +9,25 @@
 
 #include <gtest/gtest.h>
 
-TEST(IpConverter, Concatenate)
+TEST(IpConverter, ConcatenateIpAddress)
 {
     auto addr = concatenateIpAddress(192, 168, 1, 23);
     // 0xC0A80117 : 192.168.1.23
     EXPECT_EQ(0xC0A80117, addr);
 }
 
+TEST(IpConverter, ConcatenateHardwareAddress)
+{
+    auto addr = concatenateHardwareAddress(0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF);
+    EXPECT_EQ(0xAABBCCDDEEFF, addr);
+}
+
 TEST(IpConverter, StringToIntegerConvert)
 {
-    auto addr = convertIpAddress("192.168.1.23");
+    bool ok{};
+    auto addr = convertIpAddress("192.168.1.23", ok);
     // 0xC0A80117 : 192.168.1.23
+    EXPECT_TRUE(ok);
     EXPECT_EQ(0xC0A80117, addr);
 }
 

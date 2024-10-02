@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <ranges>
 
 void Network::configure(NetworkConfiguration&& config, const std::vector<Lease>& leases)
 {
@@ -24,6 +25,8 @@ void Network::configure(NetworkConfiguration&& config, const std::vector<Lease>&
     m_leaseTime = config.leaseTime;
     m_leaseFile = config.leaseFile;
 
+    m_reservationByHw = std::move(config.reservations);
+
     m_leasesByHw.clear();
     m_leasesByIp.clear();
 
@@ -31,6 +34,11 @@ void Network::configure(NetworkConfiguration&& config, const std::vector<Lease>&
     {
         m_leasesByHw[lease.hwAddress] = lease;
         m_leasesByIp[lease.ipAddress] = lease;
+    }
+
+    for (const auto& [hwAddress, ipAddress] : m_reservationByHw)
+    {
+        m_reservationByIp[ipAddress] = hwAddress;
     }
 }
 
@@ -142,11 +150,35 @@ std::uint32_t Network::getAvailableAddress(std::uint64_t hardwareAddress, std::u
 {
     std::lock_guard lockGuard(m_leasesMutex);
 
-    /* Preferred IP is specified, check if it's allowed and if there's any expired lease on it. */
-    /* Check if preferred IP is allowed - within the network and not the first and last address. */
+    /*
+     * External requests with preferredIpAddress outside the DHCP range is not allowed.
+    */
+    if (preferredIpAddress > 0 &&
+        ((preferredIpAddress < m_dhcpFirst) || (m_dhcpLast < preferredIpAddress)))
+    {
+        preferredIpAddress = 0;
+    }
+
+    /*
+     * Reserved address from config file has the greatest precedence.
+     * These reservations are allowed to go outside the DHCP range.
+    */
+    const auto preferredFromConfig = m_reservationByHw.contains(hardwareAddress);
+    if (preferredFromConfig)
+    {
+        preferredIpAddress = m_reservationByHw[hardwareAddress];
+    }
+
+    /*
+     * Preferred IP is specified, check if it's allowed and if there's any expired lease on it.
+     * Check if preferred IP is allowed - within the network and not the first and last address.
+     * Disallow if IP is reserved by different hardware address.
+     * Address outside the DHCP range is allowed.
+    */
     if (preferredIpAddress != 0)
     {
-        if (!isIpAllowed(preferredIpAddress))
+        if (!isIpAllowed(preferredIpAddress)
+            || (m_reservationByIp.contains(preferredIpAddress) && m_reservationByIp[preferredIpAddress] != hardwareAddress))
         {
             preferredIpAddress = 0;
         }
@@ -159,10 +191,11 @@ std::uint32_t Network::getAvailableAddress(std::uint64_t hardwareAddress, std::u
     }
 
     /*
-     * Check:
+     * As long as we've got no reservations from config, check:
      * - If hardwareAddress has an existing expired lease, remove it
      * - If hardwareAddress has an existing not expired lease, provide that over the preference
     */
+    if (!preferredFromConfig)
     {
         const auto& lease = getLease(hardwareAddress);
         if (isLeaseEntryValid(lease))
@@ -186,7 +219,7 @@ std::uint32_t Network::getAvailableAddress(std::uint64_t hardwareAddress, std::u
     for (std::uint32_t ip = m_dhcpFirst; ip <= m_dhcpLast; ++ip)
     {
         const auto& lease = getLease(ip);
-        if (!isLeaseEntryValid(lease) || isLeaseExpired(lease))
+        if ((!isLeaseEntryValid(lease) || isLeaseExpired(lease)) && !isIpReservedInConfig(ip))
             return ip;
     }
 
@@ -202,6 +235,13 @@ bool Network::reserveAddress(std::uint64_t hardwareAddress, std::uint32_t ipAddr
     if (!isIpAllowed(ipAddress))
     {
         return false;
+    }
+
+    /* Allow reserved address to correct hardware address */
+    if (m_reservationByHw.contains(hardwareAddress) && m_reservationByHw[hardwareAddress] == ipAddress)
+    {
+        addLease(hardwareAddress, ipAddress);
+        return true;
     }
 
     /* Check if IP has a non-expired lease by different hardware address */
@@ -248,7 +288,7 @@ bool Network::isIpAllowed(std::uint32_t ipAddress) const
     const auto mask = ~0 << (32 - m_networkSize);
     return ((ipAddress & mask) == (m_networkSpace & mask)
             && ipAddress != m_networkSpace // first address
-            && ipAddress != (m_networkSpace & ~mask)); // last address
+            && ipAddress != (m_networkSpace | ~mask)); // last address
 }
 
 void Network::addLease(std::uint64_t hwAddress, std::uint32_t ipAddress)
@@ -282,5 +322,13 @@ void Network::removeLease(std::uint32_t ipAddress)
 
     m_leasesByIp.erase(ipAddress);
     m_leasesByHw.erase(hwAddress);
+}
+
+bool Network::isIpReservedInConfig(std::uint32_t ipAddress) const
+{
+    return std::ranges::any_of(m_reservationByHw,
+                               [&ipAddress](const auto& kv) {
+                                   return kv.second == ipAddress;
+                               });
 }
 

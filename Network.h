@@ -20,7 +20,7 @@
 class Network
 {
 public:
-    void configure(NetworkConfiguration&& config, const std::vector<Lease>& leases);
+    void configure(NetworkConfiguration&& config, const std::vector<Lease>& leases = {});
 
     void setNetworkSpace(std::uint32_t networkSpace);
 
@@ -69,16 +69,18 @@ public:
     bool isLeaseExpired(const Lease& lease) const;
 
 private:
-    /* Unit tests depend on the default values provided here. */
-    std::uint32_t m_networkSpace{ concatenateIpAddress(192, 168, 200, 0) };
-    std::uint8_t m_networkSize{ 24 };
-    std::uint32_t m_routers{ concatenateIpAddress(192, 168, 200, 1) };
-    std::uint32_t m_dhcpServerIdentifier{ concatenateIpAddress(192, 168, 200, 1) };
-    std::uint32_t m_dhcpFirst{ concatenateIpAddress(192, 168, 200, 100) };
-    std::uint32_t m_dhcpLast{ concatenateIpAddress(192, 168, 200, 254) };
+    std::uint32_t m_networkSpace{ NetworkDefaults::space };
+    std::uint8_t m_networkSize{ NetworkDefaults::size };
+    std::uint32_t m_routers{ NetworkDefaults::routers };
+    std::uint32_t m_dhcpServerIdentifier{ NetworkDefaults::serverIdentifier };
+    std::uint32_t m_dhcpFirst{ NetworkDefaults::first };
+    std::uint32_t m_dhcpLast{ NetworkDefaults::last };
     std::vector<std::uint32_t> m_dnsServers;
-    std::uint32_t m_leaseTime{ 3600 };
+    std::uint32_t m_leaseTime{ NetworkDefaults::leaseTime };
     std::string m_leaseFile;
+
+    std::unordered_map<std::uint64_t, std::uint32_t> m_reservationByHw;
+    std::unordered_map<std::uint32_t, std::uint64_t> m_reservationByIp;
 
     std::unordered_map<std::uint64_t, Lease> m_leasesByHw;
     std::unordered_map<std::uint32_t, Lease> m_leasesByIp;
@@ -88,6 +90,8 @@ private:
     const Lease m_invalidLease;
 
     bool isIpAllowed(std::uint32_t ipAddress) const;
+
+    bool isIpReservedInConfig(std::uint32_t ipAddress) const;
 
     void addLease(std::uint64_t hwAddress, std::uint32_t ipAddress);
 

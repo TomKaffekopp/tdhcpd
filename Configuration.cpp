@@ -20,52 +20,12 @@ std::unordered_map<std::string,NetworkConfiguration> Configs;
 std::string LogFileName;
 Log::Level LogLevel{Log::Level::Info };
 
-bool handleConfig_network(std::string_view val, NetworkConfiguration& config) try
+std::vector<std::string> parseParameterList(std::string_view val)
 {
-    auto splitpos = val.find('/');
-    if (splitpos == std::string::npos)
-    {
-        Log::Critical("Configuration error: Network must be specified with CIDR");
-        return false;
-    }
+    // config_key parameter_one parameter_two parameter_3 ....
+    //            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ -- This part.
 
-    config.networkSpace = convertIpAddress(val.substr(0, splitpos));
-    config.networkSize = std::stoi(std::string(val.substr(splitpos + 1)));
-    return config.networkSpace != 0;
-}
-catch (...)
-{
-    Log::Critical("Configuration error: Network must be specified with CIDR");
-    return false;
-}
-
-bool handleConfig_routers(std::string_view val, NetworkConfiguration& config)
-{
-    config.routers = convertIpAddress(val);
-    return config.routers != 0;
-}
-
-bool handleConfig_serverid(std::string_view val, NetworkConfiguration& config)
-{
-    config.dhcpServerIdentifier = convertIpAddress(val);
-    return config.dhcpServerIdentifier != 0;
-}
-
-bool handleConfig_dhcp_first(std::string_view val, NetworkConfiguration& config)
-{
-    config.dhcpFirst = convertIpAddress(val);
-    return config.dhcpFirst != 0;
-}
-
-bool handleConfig_dhcp_last(std::string_view val, NetworkConfiguration& config)
-{
-    config.dhcpLast = convertIpAddress(val);
-    return config.dhcpLast != 0;
-}
-
-bool handleConfig_dns_servers(std::string_view val, NetworkConfiguration& config)
-{
-    auto consumeAddress = [&val]
+    auto consumeParameter = [&val]
     {
         if (val.empty())
             return std::string();
@@ -88,11 +48,90 @@ bool handleConfig_dns_servers(std::string_view val, NetworkConfiguration& config
             val = val.substr(end);
     };
 
+    std::vector<std::string> parameterList;
+
     while (!val.empty())
     {
-        auto address = consumeAddress();
+        auto parameter = consumeParameter();
         consumeWhitespace();
-        config.dnsServers.emplace_back(convertIpAddress(address));
+        parameterList.emplace_back(std::move(parameter));
+    }
+
+    return parameterList;
+}
+
+bool handleConfig_network(std::string_view val, NetworkConfiguration& config) try
+{
+    // network 192.168.200.0/24
+
+    auto splitpos = val.find('/');
+    if (splitpos == std::string::npos)
+    {
+        Log::Critical("Configuration error: Network must be specified with CIDR");
+        return false;
+    }
+
+    bool ok{};
+    config.networkSpace = convertIpAddress(val.substr(0, splitpos), ok);
+    config.networkSize = std::stoi(std::string(val.substr(splitpos + 1)));
+    return ok && config.networkSpace != 0;
+}
+catch (...)
+{
+    Log::Critical("Configuration error: Network must be specified with CIDR");
+    return false;
+}
+
+bool handleConfig_routers(std::string_view val, NetworkConfiguration& config)
+{
+    // routers 192.168.200.1
+
+    bool ok{};
+    config.routers = convertIpAddress(val, ok);
+    return ok && config.routers != 0;
+}
+
+bool handleConfig_serverid(std::string_view val, NetworkConfiguration& config)
+{
+    // serverid 192.168.200.1
+
+    bool ok{};
+    config.dhcpServerIdentifier = convertIpAddress(val, ok);
+    return ok && config.dhcpServerIdentifier != 0;
+}
+
+bool handleConfig_dhcp_first(std::string_view val, NetworkConfiguration& config)
+{
+    // dhcp_first 192.168.200.100
+
+    bool ok{};
+    config.dhcpFirst = convertIpAddress(val, ok);
+    return ok && config.dhcpFirst != 0;
+}
+
+bool handleConfig_dhcp_last(std::string_view val, NetworkConfiguration& config)
+{
+    // dhcp_last 192.168.200.254
+
+    bool ok{};
+    config.dhcpLast = convertIpAddress(val, ok);
+    return ok && config.dhcpLast != 0;
+}
+
+bool handleConfig_dns_servers(std::string_view val, NetworkConfiguration& config)
+{
+    // dns_servers serverip1 serverip2
+
+    auto parameterList = parseParameterList(val);
+
+    for (const auto& address : parameterList)
+    {
+        bool ok{};
+
+        config.dnsServers.emplace_back(convertIpAddress(address, ok));
+
+        if (!ok)
+            return false;
     }
 
     return !config.dnsServers.empty();
@@ -100,14 +139,42 @@ bool handleConfig_dns_servers(std::string_view val, NetworkConfiguration& config
 
 bool handleConfig_lease_time(std::string_view val, NetworkConfiguration& config)
 {
+    // lease_time 86400
+
     config.leaseTime = std::stoi(std::string(val));
     return config.leaseTime > 0;
 }
 
 bool handleConfig_lease_file(std::string_view val, NetworkConfiguration& config)
 {
+    // lease_file /var/tdhcpd/eth0.lease
+
     config.leaseFile = val;
     return !config.leaseFile.empty();
+}
+
+bool handleConfig_reserve(std::string_view val, NetworkConfiguration& config)
+{
+    // reserve 11:22:33:44:55:66 192.168.200.123
+
+    auto parameterList = parseParameterList(val);
+    if (parameterList.size() != 2)
+        return false;
+
+    const auto& hwaddrStr = parameterList[0];
+    const auto& ipaddrStr = parameterList[1];
+
+    bool hwok{};
+    bool ipok{};
+
+    auto hwaddr = convertHardwareAddress(hwaddrStr, hwok);
+    auto ipaddr = convertIpAddress(ipaddrStr, ipok);
+
+    if (!hwok || !ipok)
+        return false;
+
+    config.reservations[hwaddr] = ipaddr;
+    return true;
 }
 
 bool handleConfigEntry(std::string_view key, std::string_view val, NetworkConfiguration& config)
@@ -135,6 +202,9 @@ bool handleConfigEntry(std::string_view key, std::string_view val, NetworkConfig
 
     else if (key == "lease_file")
         return handleConfig_lease_file(val, config);
+
+    else if (key == "reserve")
+        return handleConfig_reserve(val, config);
 
     Log::Critical("Configuration error: Unknown config key {}", key);
     return false;
@@ -250,8 +320,13 @@ bool Configuration::LoadFromFile(const std::string& path)
 std::vector<std::string> Configuration::GetConfiguredInterfaces()
 {
     std::vector<std::string> interfaces;
+    interfaces.reserve(Configs.size());
+
     for (const auto& [interface, config] : Configs)
+    {
         interfaces.emplace_back(interface);
+    }
+
     return interfaces;
 }
 
@@ -361,4 +436,3 @@ Log::Level Configuration::GetLogLevel()
 {
     return LogLevel;
 }
-

@@ -299,3 +299,190 @@ TEST(AddressPoolTests, LeaseTime_WithPreferred_SameHardware)
 
     net.reserveAddress(300, adr2);
 }
+
+TEST(ReservedAddressTests, OutsideRange)
+{
+    NetworkConfiguration config;
+
+    // reserve .200.90 for hardware address 1000
+    config.reservations[1000] = concatenateIpAddress(192, 168, 200, 90);
+
+    Network net;
+    net.configure(std::move(config));
+
+    auto addr = net.getAvailableAddress(1000);
+    EXPECT_EQ(concatenateIpAddress(192, 168, 200, 90), addr);
+
+    auto ok = net.reserveAddress(1000, addr);
+    EXPECT_TRUE(ok);
+}
+
+TEST(ReservedAddressTests, InsideRange_0)
+{
+    NetworkConfiguration config;
+
+    config.dhcpFirst = concatenateIpAddress(192, 168, 200, 100);
+    config.dhcpLast = concatenateIpAddress(192, 168, 200, 254);
+
+    // reserve .200.100 for hardware address 1000
+    config.reservations[1000] = concatenateIpAddress(192, 168, 200, 100);
+
+    Network net;
+    net.configure(std::move(config));
+
+    auto addr = net.getAvailableAddress(1000);
+    EXPECT_EQ(concatenateIpAddress(192, 168, 200, 100), addr);
+
+    auto ok = net.reserveAddress(1000, addr);
+    EXPECT_TRUE(ok);
+}
+
+TEST(ReservedAddressTests, InsideRange_1)
+{
+    NetworkConfiguration config;
+
+    config.dhcpFirst = concatenateIpAddress(192, 168, 200, 100);
+    config.dhcpLast = concatenateIpAddress(192, 168, 200, 254);
+
+    // reserve .200.101 for hardware address 1000
+    config.reservations[1000] = concatenateIpAddress(192, 168, 200, 101);
+
+    Network net;
+    net.configure(std::move(config));
+
+    auto addr = net.getAvailableAddress(1000);
+    EXPECT_EQ(concatenateIpAddress(192, 168, 200, 101), addr);
+
+    auto ok = net.reserveAddress(1000, addr);
+    EXPECT_TRUE(ok);
+}
+
+TEST(ReservedAddressTests, InsideRange_2)
+{
+    NetworkConfiguration config;
+
+    config.dhcpFirst = concatenateIpAddress(192, 168, 200, 100);
+    config.dhcpLast = concatenateIpAddress(192, 168, 200, 254);
+
+    // reserve .200.102 for hardware address 1000
+    config.reservations[1000] = concatenateIpAddress(192, 168, 200, 253);
+
+    Network net;
+    net.configure(std::move(config));
+
+    auto addr = net.getAvailableAddress(1000);
+    EXPECT_EQ(concatenateIpAddress(192, 168, 200, 253), addr);
+
+    auto ok = net.reserveAddress(1000, addr);
+    EXPECT_TRUE(ok);
+}
+
+TEST(ReservedAddressTests, InsideRange_LastValid)
+{
+    NetworkConfiguration config;
+
+    config.dhcpFirst = concatenateIpAddress(192, 168, 200, 100);
+    config.dhcpLast = concatenateIpAddress(192, 168, 200, 254);
+
+    // reserve .200.254 for hardware address 1000
+    config.reservations[1000] = concatenateIpAddress(192, 168, 200, 254);
+
+    Network net;
+    net.configure(std::move(config));
+
+    auto addr = net.getAvailableAddress(1000);
+    EXPECT_EQ(concatenateIpAddress(192, 168, 200, 254), addr);
+
+    auto ok = net.reserveAddress(1000, addr);
+    EXPECT_TRUE(ok);
+}
+
+TEST(ReservedAddressTests, NetworkAddress)
+{
+    NetworkConfiguration config;
+
+    config.dhcpFirst = concatenateIpAddress(192, 168, 200, 100);
+    config.dhcpLast = concatenateIpAddress(192, 168, 200, 254);
+
+    // reserve .200.0 for hardware address 1000
+    config.reservations[1000] = concatenateIpAddress(192, 168, 200, 0);
+
+    Network net;
+    net.configure(std::move(config));
+
+    auto addr = net.getAvailableAddress(1000);
+
+    // Not equal!
+    EXPECT_NE(concatenateIpAddress(192, 168, 200, 0), addr);
+
+    // 'addr' should be a valid address, just not *that* one.
+    auto ok = net.reserveAddress(1000, addr);
+    EXPECT_TRUE(ok);
+}
+
+TEST(ReservedAddressTests, BroadcastAddress)
+{
+    NetworkConfiguration config;
+
+    config.dhcpFirst = concatenateIpAddress(192, 168, 200, 100);
+    config.dhcpLast = concatenateIpAddress(192, 168, 200, 254);
+
+    // reserve .200.255 for hardware address 1000
+    config.reservations[1000] = concatenateIpAddress(192, 168, 200, 255);
+
+    Network net;
+    net.configure(std::move(config));
+
+    auto addr = net.getAvailableAddress(1000);
+
+    // Not equal!
+    EXPECT_NE(concatenateIpAddress(192, 168, 200, 255), addr);
+
+    // 'addr' should be a valid address, just not *that* one.
+    auto ok = net.reserveAddress(1000, addr);
+    EXPECT_TRUE(ok);
+}
+
+TEST(ReservedAddressTests, PreferredFromDifferentHardwareAddress_OutsideRange)
+{
+    NetworkConfiguration config;
+    config.dhcpFirst = concatenateIpAddress(192, 168, 200, 100);
+    config.dhcpLast = concatenateIpAddress(192, 168, 200, 254);
+
+    // reserve .200.90 for hardware address 1000
+    config.reservations[1000] = concatenateIpAddress(192, 168, 200, 90);
+
+    Network net;
+    net.configure(std::move(config));
+
+    // Different hardware address 1001 asks for the reserved address
+    auto addr = net.getAvailableAddress(1001, concatenateIpAddress(192, 168, 200, 90));
+
+    // Not equeal - request was denied, got another address.
+    EXPECT_NE(concatenateIpAddress(192, 168, 200, 90), addr);
+
+    auto ok = net.reserveAddress(1001, addr);
+    EXPECT_TRUE(ok);
+}
+
+TEST(ReservedAddressTests, PreferredFromDifferentHardwareAddress_InsideRange)
+{
+    NetworkConfiguration config;
+    config.dhcpFirst = concatenateIpAddress(192, 168, 200, 100);
+    config.dhcpLast = concatenateIpAddress(192, 168, 200, 254);
+
+    // reserve .200.110 for hardware address 1000
+    config.reservations[1000] = concatenateIpAddress(192, 168, 200, 110);
+
+    Network net;
+    net.configure(std::move(config));
+
+    // Different hardware address 1001 asks for the reserved address
+    auto addr = net.getAvailableAddress(1001, concatenateIpAddress(192, 168, 200, 110));
+
+    // Not equeal - request was denied, got another address.
+    EXPECT_NE(concatenateIpAddress(192, 168, 200, 110), addr);
+
+    auto ok = net.reserveAddress(1001, addr);
+    EXPECT_TRUE(ok);
+}
