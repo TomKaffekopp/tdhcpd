@@ -374,7 +374,7 @@ bool loadFromFileImpl(const std::string& path, NetworkConfiguration* current)
                 return false;
             }
 
-            if (val.front() == '/')
+            if (val.front() != '/')
             {
                 Log::Critical("Configuration error: Parameter 'include' must be an absolute path");
                 return false;

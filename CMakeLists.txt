@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.28)
 project(tdhcpd)
 
 set(TDHCPD_VERSION_NUMBER "1.1.0")
-set(TDHCPD_VERSION_SUFFIX "dev6")
+set(TDHCPD_VERSION_SUFFIX "dev7")
 
 if ("${TDHCPD_VERSION_SUFFIX}" STREQUAL "")
     set(TDHCPD_VERSION "${TDHCPD_VERSION_NUMBER}")
