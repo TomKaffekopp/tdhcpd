@@ -8,6 +8,7 @@
 #include "Configuration.h"
 #include "IpConverter.h"
 #include "Logger.h"
+#include "StaticConfig.h"
 
 #include <cstring>
 
@@ -65,6 +66,12 @@ bool handleConfig_network(std::string_view val, NetworkConfiguration& config) tr
 {
     // network 192.168.200.0/24
 
+    if (val.empty())
+    {
+        Log::Critical("Configuration error: Parameter 'network' specified without value");
+        return false;
+    }
+
     auto splitpos = val.find('/');
     if (splitpos == std::string::npos)
     {
@@ -87,6 +94,12 @@ bool handleConfig_routers(std::string_view val, NetworkConfiguration& config)
 {
     // routers 192.168.200.1
 
+    if (val.empty())
+    {
+        Log::Critical("Configuration error: Parameter 'routers' specified without value");
+        return false;
+    }
+
     bool ok{};
     config.routers = convertIpAddress(val, ok);
     return ok && config.routers != 0;
@@ -95,6 +108,12 @@ bool handleConfig_routers(std::string_view val, NetworkConfiguration& config)
 bool handleConfig_serverid(std::string_view val, NetworkConfiguration& config)
 {
     // serverid 192.168.200.1
+
+    if (val.empty())
+    {
+        Log::Critical("Configuration error: Parameter 'serverid' specified without value");
+        return false;
+    }
 
     bool ok{};
     config.dhcpServerIdentifier = convertIpAddress(val, ok);
@@ -105,6 +124,12 @@ bool handleConfig_dhcp_first(std::string_view val, NetworkConfiguration& config)
 {
     // dhcp_first 192.168.200.100
 
+    if (val.empty())
+    {
+        Log::Critical("Configuration error: Parameter 'dhcp_first' specified without value");
+        return false;
+    }
+
     bool ok{};
     config.dhcpFirst = convertIpAddress(val, ok);
     return ok && config.dhcpFirst != 0;
@@ -114,6 +139,12 @@ bool handleConfig_dhcp_last(std::string_view val, NetworkConfiguration& config)
 {
     // dhcp_last 192.168.200.254
 
+    if (val.empty())
+    {
+        Log::Critical("Configuration error: Parameter 'dhcp_last' specified without value");
+        return false;
+    }
+
     bool ok{};
     config.dhcpLast = convertIpAddress(val, ok);
     return ok && config.dhcpLast != 0;
@@ -122,6 +153,12 @@ bool handleConfig_dhcp_last(std::string_view val, NetworkConfiguration& config)
 bool handleConfig_dns_servers(std::string_view val, NetworkConfiguration& config)
 {
     // dns_servers serverip1 serverip2
+
+    if (val.empty())
+    {
+        Log::Critical("Configuration error: Parameter 'dns_servers' specified without value");
+        return false;
+    }
 
     auto parameterList = parseParameterList(val);
 
@@ -142,6 +179,12 @@ bool handleConfig_lease_time(std::string_view val, NetworkConfiguration& config)
 {
     // lease_time 86400
 
+    if (val.empty())
+    {
+        Log::Critical("Configuration error: Parameter 'lease_time' specified without value");
+        return false;
+    }
+
     config.leaseTime = std::stoi(std::string(val));
     return config.leaseTime > 0;
 }
@@ -149,6 +192,12 @@ bool handleConfig_lease_time(std::string_view val, NetworkConfiguration& config)
 bool handleConfig_renewal_time(std::string_view val, NetworkConfiguration& config)
 {
     // renewal_time 43200
+
+    if (val.empty())
+    {
+        Log::Critical("Configuration error: Parameter 'renewal_time' specified without value");
+        return false;
+    }
 
     config.renewalTime = std::stoi(std::string(val));
     return config.renewalTime > 0;
@@ -158,6 +207,12 @@ bool handleConfig_rebinding_time(std::string_view val, NetworkConfiguration& con
 {
     // rebinding_time 75600
 
+    if (val.empty())
+    {
+        Log::Critical("Configuration error: Parameter 'rebinding_time' specified without value");
+        return false;
+    }
+
     config.rebindingTime = std::stoi(std::string(val));
     return config.rebindingTime > 0;
 }
@@ -165,6 +220,12 @@ bool handleConfig_rebinding_time(std::string_view val, NetworkConfiguration& con
 bool handleConfig_lease_file(std::string_view val, NetworkConfiguration& config)
 {
     // lease_file /var/tdhcpd/eth0.lease
+
+    if (val.empty())
+    {
+        Log::Critical("Configuration error: Parameter 'lease_file' specified without value");
+        return false;
+    }
 
     config.leaseFile = val;
     return !config.leaseFile.empty();
@@ -174,9 +235,18 @@ bool handleConfig_reserve(std::string_view val, NetworkConfiguration& config)
 {
     // reserve 11:22:33:44:55:66 192.168.200.123
 
+    if (val.empty())
+    {
+        Log::Critical("Configuration error: Parameter 'reserve' specified without value");
+        return false;
+    }
+
     auto parameterList = parseParameterList(val);
     if (parameterList.size() != 2)
+    {
+        Log::Critical("Configuration error: Parameter 'reserve' specified with too few values");
         return false;
+    }
 
     const auto& hwaddrStr = parameterList[0];
     const auto& ipaddrStr = parameterList[1];
@@ -232,10 +302,8 @@ bool handleConfigEntry(std::string_view key, std::string_view val, NetworkConfig
     Log::Critical("Configuration error: Unknown config key {}", key);
     return false;
 }
-} // Anonymous ns
 
-
-bool Configuration::LoadFromFile(const std::string& path)
+bool loadFromFileImpl(const std::string& path, NetworkConfiguration* current)
 {
     auto stripCommentAndWhitespace = [](std::string_view input) -> std::string_view
     {
@@ -281,9 +349,12 @@ bool Configuration::LoadFromFile(const std::string& path)
         return input.substr(start);
     };
 
-    NetworkConfiguration* current = nullptr;
-
     std::ifstream ifs(path);
+    if (!ifs.is_open())
+    {
+        Log::Critical("Configuration error: Couldn't open configuration file {}", path);
+        return false;
+    }
 
     char buf[1024]{};
     while (ifs.getline(buf, sizeof(buf)))
@@ -295,23 +366,72 @@ bool Configuration::LoadFromFile(const std::string& path)
         auto key = getKey(line);
         auto val = getVal(line);
 
-        if (key == "interface")
+        if (key == "include")
         {
+            if (val.empty())
+            {
+                Log::Critical("Configuration error: Parameter 'include' specified without value");
+                return false;
+            }
+
+            if (val.front() == '/')
+            {
+                Log::Critical("Configuration error: Parameter 'include' must be an absolute path");
+                return false;
+            }
+
+            if (val == StaticConfig::ConfigFile)
+            {
+                Log::Critical("Configuration error: Cannot include the main configuration file");
+                return false;
+            }
+
+            if (!loadFromFileImpl(std::string(val), current))
+                return false; // Errors are already logged.
+
+            continue;
+        }
+        else if (key == "interface")
+        {
+            if (val.empty())
+            {
+                Log::Critical("Configuration error: Parameter 'interface' specified without value");
+                return false;
+            }
+
             current = &(Configs[std::string(val)]);
             continue;
         }
         else if (key == "pidfile")
         {
+            if (val.empty())
+            {
+                Log::Critical("Configuration error: Parameter 'pidfile' specified without value");
+                return false;
+            }
+
             PidFileName = val;
             continue;
         }
         else if (key == "logfile")
         {
+            if (val.empty())
+            {
+                Log::Critical("Configuration error: Parameter 'logfile' specified without value");
+                return false;
+            }
+
             LogFileName = val;
             continue;
         }
         else if (key == "loglevel")
         {
+            if (val.empty())
+            {
+                Log::Critical("Configuration error: Parameter 'loglevel' specified without value");
+                return false;
+            }
+
             LogLevel = Log::ToLogLevel(val);
             continue;
         }
@@ -350,18 +470,25 @@ bool Configuration::LoadFromFile(const std::string& path)
 
         if (config.renewalTime >= config.rebindingTime)
         {
-            Log::Critical("Parameter renewal_time must be less than rebinding_time for interface {}", interface);
+            Log::Critical("Configuration error: Parameter renewal_time must be less than rebinding_time for interface {}", interface);
             return false;
         }
 
         if (config.rebindingTime >= config.leaseTime)
         {
-            Log::Critical("Parameter rebinding_time must be less than lease_time for interface {}", interface);
+            Log::Critical("Configuration error: Parameter rebinding_time must be less than lease_time for interface {}", interface);
             return false;
         }
     }
 
     return true;
+}
+
+} // Anonymous ns
+
+bool Configuration::LoadFromFile(const std::string& path)
+{
+    return loadFromFileImpl(path, nullptr);
 }
 
 std::vector<std::string> Configuration::GetConfiguredInterfaces()
