@@ -33,7 +33,6 @@ std::ofstream logfile;
 void sigtermFn(int)
 {
     Log::Info("Exiting TDHCPD...");
-    BootpHandler::stop();
     running = false;
     cv_running.notify_one();
 }
@@ -69,20 +68,6 @@ void writePidFile()
     }
 
     ofs << std::to_string(getpid());
-}
-
-std::unordered_map<std::string, Network> createNetworks(std::span<std::string> interfaces)
-{
-    std::unordered_map<std::string, Network> network;
-
-    for (const auto& interface : interfaces)
-    {
-        auto config = Configuration::GetNetworkConfiguration(interface);
-        auto leases = Configuration::GetPersistentLeasesByInterface(interface);
-        network[interface].configure(std::move(config), leases);
-    }
-
-    return network;
 }
 
 void logToSyslog(Log::Level level, std::string_view text)
@@ -198,8 +183,6 @@ int main()
               StaticConfig::ClientPort);
 
     auto interfaces = Configuration::GetConfiguredInterfaces();
-
-    BootpHandler::start(createNetworks(interfaces));
 
     std::forward_list<BootpSocket> sockets;
 

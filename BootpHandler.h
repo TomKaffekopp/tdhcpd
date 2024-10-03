@@ -14,10 +14,10 @@
 
 #include <cstdint>
 
-#include <vector>
 #include <optional>
 #include <string>
 #include <span>
+#include <memory>
 
 struct BootpResponse
 {
@@ -25,10 +25,12 @@ struct BootpResponse
     std::vector<std::uint8_t> data;
 };
 
-namespace BootpHandler
+struct BootpHandlerPrivate;
+class BootpHandler
 {
-    void start(std::unordered_map<std::string, Network>&&);
-    void stop();
-    void addRequestData(std::string deviceSource, std::span<const std::uint8_t> data);
-    std::optional<BootpResponse> getNextResponse();
-}
+    std::unique_ptr<BootpHandlerPrivate> mp;
+public:
+    explicit BootpHandler(std::string deviceName);
+    ~BootpHandler();
+    std::optional<BootpResponse> handleRequest(std::span<const std::uint8_t> data);
+};

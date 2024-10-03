@@ -14,35 +14,14 @@
 #include <cstdlib> // for system(), remove when arp manipulation is done without calling /sbin/arp
 
 #include <format>
-#include <queue>
-#include <atomic>
-#include <mutex>
-#include <thread>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 
 constexpr auto ArpProgram{ "/sbin/arp" };
 
 namespace
 {
-struct Request
-{
-    std::string deviceSource;
-    BOOTP bootp;
-};
-
-std::queue<Request> requests;
-std::queue<BootpResponse> outbound;
-std::unordered_map<std::uint64_t, BOOTP> offers;
-
-std::mutex requestsMutex;
-std::mutex responsesMutex;
-
-std::thread thread;
-std::atomic_bool running{ true };
-
-std::unordered_map<std::string, Network> networks;
-
 void addArpEntry(std::string_view iface, std::string_view ip, std::string_view hw)
 {
     /*
@@ -56,44 +35,30 @@ void addArpEntry(std::string_view iface, std::string_view ip, std::string_view h
     }
 }
 
-bool hasRequests()
+DHCPMessageType getMessageType(const BOOTP& bootp)
 {
-    std::lock_guard lockGuard(requestsMutex);
-    return !requests.empty();
-}
-
-Request getNextRequest()
-{
-    std::lock_guard lockGuard(requestsMutex);
-    auto request = std::move(requests.front());
-    requests.pop();
-    return request;
-}
-
-DHCPMessageType getMessageType(const Request& request)
-{
-    auto it = request.bootp.options.find(Option_MessageType);
-    if (it == request.bootp.options.end())
+    auto it = bootp.options.find(Option_MessageType);
+    if (it == bootp.options.end())
         return DHCP_UnknownMessage;
 
     auto& messageTypeHolder = dynamic_cast<DHCPMessageTypeBOOTPOption&>(*it->second);
     return messageTypeHolder.getMessageType();
 }
 
-std::span<const BOOTPOptionKey> getParameterList(const Request& request)
+std::span<const BOOTPOptionKey> getParameterList(const BOOTP& bootp)
 {
-    auto it = request.bootp.options.find(Option_ParameterRequestList);
-    if (it == request.bootp.options.end())
+    auto it = bootp.options.find(Option_ParameterRequestList);
+    if (it == bootp.options.end())
         return {};
 
     auto& parameterListHolder = dynamic_cast<ParameterListBOOTPOption&>(*it->second);
     return parameterListHolder.getParameters();
 }
 
-std::uint32_t getRequestedIpAddress(const Request& request)
+std::uint32_t getRequestedIpAddress(const BOOTP& bootp)
 {
-    auto it = request.bootp.options.find(Option_RequestedIp);
-    if (it == request.bootp.options.end())
+    auto it = bootp.options.find(Option_RequestedIp);
+    if (it == bootp.options.end())
         return 0;
 
     auto& ipListHolder = dynamic_cast<IpListBOOTPOption&>(*it->second);
@@ -103,7 +68,7 @@ std::uint32_t getRequestedIpAddress(const Request& request)
     return ipListHolder.getIps().front();
 }
 
-void provideParameterList(const Network& network, const Request& request, BOOTP& offer)
+void provideParameterList(const Network& network, const BOOTP& bootp, BOOTP& offer)
 {
     /* DHCP Offer */
     auto& offerMessageTypeOption = offer.options[Option_MessageType];
@@ -147,7 +112,7 @@ void provideParameterList(const Network& network, const Request& request, BOOTP&
 
     std::string optionslog;
 
-    auto parameterList = getParameterList(request);
+    auto parameterList = getParameterList(bootp);
     for (auto parameter : parameterList)
     {
         switch (parameter)
@@ -204,234 +169,213 @@ void provideParameterList(const Network& network, const Request& request, BOOTP&
     }
 
     Log::Debug("Parameter request from {} - {}",
-               convertHardwareAddress(request.bootp.chaddr),
+               convertHardwareAddress(bootp.chaddr),
                optionslog);
-}
-
-void handleDhcpDiscover(const Request& request)
-{
-    if (request.bootp.operation != BOOTP_Request)
-        return; // This would be a bug in the DHCP client.
-
-    auto& network = networks[request.deviceSource];
-    auto address = network.getAvailableAddress(request.bootp.chaddr);
-    if (address == 0)
-        return;  // exhausted network, don't offer anything.
-
-    auto& offer = offers[request.bootp.chaddr];
-    offer = request.bootp;
-    offer.operation = BOOTP_Reply;
-    offer.options.clear();
-    offer.yiaddr = address;
-
-    provideParameterList(network, request, offer);
-
-    BootpResponse response;
-    response.target = address;
-    response.data = serializeBootp(offer);
-    if (response.data.empty())
-        return; // Logged by serializer.
-
-    Log::Info("Offering address {} to {}",
-               convertIpAddress(address),
-               convertHardwareAddress(request.bootp.chaddr));
-
-    addArpEntry(request.deviceSource, convertIpAddress(address), convertHardwareAddress(request.bootp.chaddr));
-
-    outbound.emplace(std::move(response));
-    offers[request.bootp.chaddr] = std::move(offer);
-}
-
-void handleDhcpRequest(const Request& request)
-{
-    auto& network = networks[request.deviceSource];
-    auto markOfferWithNak = [&network] (BOOTP& offer)
-    {
-        offer.options.clear();
-        offer.options[Option_MessageType] = std::make_unique<DHCPMessageTypeBOOTPOption>(DHCP_NAK);
-        offer.options[Option_ServerIdentifier] = std::make_unique<IntegerBOOTPOption<std::uint32_t>>(
-                network.getDhcpServerIdentifier());
-        offer.yiaddr = 0;
-        offer.ciaddr = 0;
-    };
-
-    /*
-     * No offer was given to this hardware address, check for existing leases.
-    */
-    if (!offers.contains(request.bootp.chaddr))
-    {
-        const auto& lease = network.getLease(request.bootp.chaddr);
-
-        /*
-         * We don't know about this hardware address, send a NAK.
-        */
-        if (!Network::isLeaseEntryValid(lease))
-        {
-            Log::Info("Sending NAK to {} because we don't know them", convertHardwareAddress(request.bootp.chaddr));
-            auto nak = request.bootp;
-            markOfferWithNak(nak);
-            BootpResponse response;
-
-            // It doesn't make any sense (to me at least) to use any IP address wen NAK'ing in this condition.
-            // Should it be the network's broadcast (ie. 192.168.0.255 or the "universal" one, 255.255.255.255 ?)
-            // I'm using the network's for now:
-            response.target = network.getBroadcastAddress();
-
-            response.data = serializeBootp(nak);
-            if (!response.data.empty()) // the opposite condition is logged by serializer.
-            {
-                outbound.emplace(std::move(response));
-            }
-            return;
-        }
-
-        // We know about this hardware address, offer the IP we have in our record.
-
-        offers[request.bootp.chaddr] = request.bootp;
-        auto& offer = offers[request.bootp.chaddr];
-        offer.operation = BOOTP_Reply;
-        offer.yiaddr = lease.ipAddress;
-        offer.options.clear();
-        provideParameterList(network, request, offer);
-    }
-
-    auto& offer = offers[request.bootp.chaddr];
-    auto requestedIpAddress = getRequestedIpAddress(request);
-    auto address = network.getAvailableAddress(request.bootp.chaddr, requestedIpAddress);
-
-    if (offer.yiaddr != requestedIpAddress || address != requestedIpAddress)
-    {
-        markOfferWithNak(offer);
-        Log::Info("Sending NAK to {} because these aren't equal: yiaddr={}, requested={}, network={}",
-                   convertHardwareAddress(request.bootp.chaddr),
-                   convertIpAddress(offer.yiaddr),
-                   convertIpAddress(requestedIpAddress),
-                   convertIpAddress(address));
-    }
-    else
-    {
-        if (network.reserveAddress(request.bootp.chaddr, address))
-        {
-            offer.options[Option_MessageType] = std::make_unique<DHCPMessageTypeBOOTPOption>(DHCP_ACK);
-            Log::Info("Sending ACK on address {} to {}",
-                       convertIpAddress(address),
-                       convertHardwareAddress(request.bootp.chaddr));
-
-            // TODO this should be done by the Network class.
-            Configuration::SavePersistentLeases(network.getAllLeases(), network.getLeaseFile());
-        }
-        else
-        {
-            markOfferWithNak(offer);
-            Log::Info("Sending NAK to {} because address reservation of {} failed (exhausted network or requested address is illegal)",
-                       convertHardwareAddress(request.bootp.chaddr),
-                       convertIpAddress(address));
-        }
-    }
-
-    BootpResponse response;
-    response.target = address;
-    response.data = serializeBootp(offer);
-    if (!response.data.empty()) // the opposite condition is logged by serializer.
-    {
-        outbound.emplace(std::move(response));
-    }
-
-    offers.erase(request.bootp.chaddr);
-}
-
-void handleDhcpRelease(const Request& request)
-{
-    Log::Info("Releasing address {} from {}", convertIpAddress(request.bootp.ciaddr), convertHardwareAddress(request.bootp.chaddr));
-    auto& network = networks[request.deviceSource];
-    network.releaseAddress(request.bootp.ciaddr);
-}
-
-void handleRequest(Request&& request)
-{
-    auto messageType = getMessageType(request);
-    switch (messageType)
-    {
-        case DHCP_Discover:
-            Log::Info("Handling DHCP Discover from {}", convertHardwareAddress(request.bootp.chaddr));
-            handleDhcpDiscover(request);
-            break;
-
-        case DHCP_Request:
-            Log::Info("Handling DHCP Request from {}", convertHardwareAddress(request.bootp.chaddr));
-            handleDhcpRequest(request);
-            break;
-
-        case DHCP_Release:
-            Log::Info("Handling DHCP Release from {}", convertHardwareAddress(request.bootp.chaddr));
-            handleDhcpRelease(request);
-            break;
-
-        case DHCP_Decline:
-            Log::Info("Handling DHCP Decline (as a release) from {}", convertHardwareAddress(request.bootp.chaddr));
-            // TODO in fact, reserve the address internally as it's most likely unusable anyway.
-            handleDhcpRelease(request);
-            break;
-
-        default:
-            break; // don't care.
-    }
-}
-
-void handlerThread()
-{
-    Log::Info("Started Bootp handler thread");
-    while (running)
-    {
-        if (!hasRequests())
-        {
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-            continue;
-        }
-
-        auto request = getNextRequest();
-        handleRequest(std::move(request));
-    }
 }
 
 } // anonymous ns
 
-void BootpHandler::start(std::unordered_map<std::string, Network>&& networks_)
+struct BootpHandlerPrivate
 {
-    networks = std::move(networks_);
-    thread = std::thread(handlerThread);
-}
-
-void BootpHandler::stop()
-{
-    running = false;
-    if (thread.joinable())
-        thread.join();
-}
-
-void BootpHandler::addRequestData(std::string deviceSource, std::span<const std::uint8_t> data)
-{
-    std::lock_guard lockGuard(requestsMutex);
-
-    Request request;
-    if (!deserializeBootp(data, request.bootp))
+    explicit BootpHandlerPrivate(std::string deviceName_)
+        : deviceName(std::move(deviceName_))
     {
-        Log::Warning("Failed to deserialize BOOTP message");
-        return;
+        auto config = Configuration::GetNetworkConfiguration(deviceName);
+        auto leases = Configuration::GetPersistentLeasesByInterface(deviceName);
+        network.configure(std::move(config), leases);
     }
 
-    request.deviceSource = std::move(deviceSource);
-    requests.emplace(std::move(request));
+    std::unordered_map<std::uint64_t, BOOTP> offers;
+    Network network;
+    std::string deviceName;
+
+    std::optional<BootpResponse> handleDhcpDiscover(const BOOTP& bootp)
+    {
+        if (bootp.operation != BOOTP_Request)
+            return std::nullopt; // This would be a bug in the DHCP client.
+
+        auto address = network.getAvailableAddress(bootp.chaddr);
+        if (address == 0)
+            return std::nullopt;  // exhausted network, don't offer anything.
+
+        auto& offer = offers[bootp.chaddr];
+        offer = bootp;
+        offer.operation = BOOTP_Reply;
+        offer.options.clear();
+        offer.yiaddr = address;
+
+        provideParameterList(network, bootp, offer);
+
+        BootpResponse response;
+        response.target = address;
+        response.data = serializeBootp(offer);
+        if (response.data.empty())
+            return std::nullopt; // Logged by serializer.
+
+        Log::Info("Offering address {} to {}",
+                   convertIpAddress(address),
+                   convertHardwareAddress(bootp.chaddr));
+
+        addArpEntry(deviceName, convertIpAddress(address), convertHardwareAddress(bootp.chaddr));
+
+        offers[bootp.chaddr] = std::move(offer);
+        return response;
+    }
+
+    std::optional<BootpResponse> handleDhcpRequest(const BOOTP& bootp)
+    {
+        auto markOfferWithNak = [this] (BOOTP& offer)
+        {
+            offer.options.clear();
+            offer.options[Option_MessageType] = std::make_unique<DHCPMessageTypeBOOTPOption>(DHCP_NAK);
+            offer.options[Option_ServerIdentifier] = std::make_unique<IntegerBOOTPOption<std::uint32_t>>(
+                    network.getDhcpServerIdentifier());
+            offer.yiaddr = 0;
+            offer.ciaddr = 0;
+        };
+
+        /*
+         * No offer was given to this hardware address, check for existing leases.
+        */
+        if (!offers.contains(bootp.chaddr))
+        {
+            const auto& lease = network.getLease(bootp.chaddr);
+
+            /*
+             * We don't know about this hardware address, send a NAK.
+            */
+            if (!Network::isLeaseEntryValid(lease))
+            {
+                Log::Info("Sending NAK to {} because we don't know them", convertHardwareAddress(bootp.chaddr));
+                auto nak = bootp;
+                markOfferWithNak(nak);
+                BootpResponse response;
+
+                // It doesn't make any sense (to me at least) to use any IP address wen NAK'ing in this condition.
+                // Should it be the network's broadcast (ie. 192.168.0.255 or the "universal" one, 255.255.255.255 ?)
+                // I'm using the network's for now:
+                response.target = network.getBroadcastAddress();
+
+                response.data = serializeBootp(nak);
+                if (!response.data.empty()) // the opposite condition is logged by serializer.
+                {
+                    return response;
+                }
+
+                return std::nullopt;
+            }
+
+            // We know about this hardware address, offer the IP we have in our record.
+
+            offers[bootp.chaddr] = bootp;
+            auto& offer = offers[bootp.chaddr];
+            offer.operation = BOOTP_Reply;
+            offer.yiaddr = lease.ipAddress;
+            offer.options.clear();
+            provideParameterList(network, bootp, offer);
+        }
+
+        auto& offer = offers[bootp.chaddr];
+        auto requestedIpAddress = getRequestedIpAddress(bootp);
+        auto address = network.getAvailableAddress(bootp.chaddr, requestedIpAddress);
+
+        if (offer.yiaddr != requestedIpAddress || address != requestedIpAddress)
+        {
+            markOfferWithNak(offer);
+            Log::Info("Sending NAK to {} because these aren't equal: yiaddr={}, requested={}, network={}",
+                       convertHardwareAddress(bootp.chaddr),
+                       convertIpAddress(offer.yiaddr),
+                       convertIpAddress(requestedIpAddress),
+                       convertIpAddress(address));
+        }
+        else
+        {
+            if (network.reserveAddress(bootp.chaddr, address))
+            {
+                offer.options[Option_MessageType] = std::make_unique<DHCPMessageTypeBOOTPOption>(DHCP_ACK);
+                Log::Info("Sending ACK on address {} to {}",
+                           convertIpAddress(address),
+                           convertHardwareAddress(bootp.chaddr));
+
+                // TODO this should be done by the Network class.
+                Configuration::SavePersistentLeases(network.getAllLeases(), network.getLeaseFile());
+            }
+            else
+            {
+                markOfferWithNak(offer);
+                Log::Info("Sending NAK to {} because address reservation of {} failed (exhausted network or requested address is illegal)",
+                           convertHardwareAddress(bootp.chaddr),
+                           convertIpAddress(address));
+            }
+        }
+
+        BootpResponse response;
+        response.target = address;
+        response.data = serializeBootp(offer);
+
+        offers.erase(bootp.chaddr);
+
+        if (!response.data.empty()) // the opposite condition is logged by serializer.
+        {
+            return response;
+        }
+
+        return std::nullopt;
+    }
+
+    void handleDhcpRelease(const BOOTP& bootp)
+    {
+        Log::Info("Releasing address {} from {}", convertIpAddress(bootp.ciaddr), convertHardwareAddress(bootp.chaddr));
+        network.releaseAddress(bootp.ciaddr);
+    }
+
+    std::optional<BootpResponse> handleRequest(const BOOTP& bootp)
+    {
+        auto messageType = getMessageType(bootp);
+        switch (messageType)
+        {
+            case DHCP_Discover:
+                Log::Info("Handling DHCP Discover from {}", convertHardwareAddress(bootp.chaddr));
+                return handleDhcpDiscover(bootp);
+
+            case DHCP_Request:
+                Log::Info("Handling DHCP Request from {}", convertHardwareAddress(bootp.chaddr));
+                return handleDhcpRequest(bootp);
+
+            case DHCP_Release:
+                Log::Info("Handling DHCP Release from {}", convertHardwareAddress(bootp.chaddr));
+                handleDhcpRelease(bootp);
+                break;
+
+            case DHCP_Decline:
+                Log::Info("Handling DHCP Decline (as a release) from {}", convertHardwareAddress(bootp.chaddr));
+                // TODO in fact, reserve the address internally as it's most likely unusable anyway.
+                handleDhcpRelease(bootp);
+                break;
+
+            default:
+                break; // don't care.
+        }
+
+        return std::nullopt;
+    }
+}; // BootpHandlerPrivate
+
+BootpHandler::BootpHandler(std::string deviceName)
+{
+    mp = std::make_unique<BootpHandlerPrivate>(std::move(deviceName));
 }
 
-std::optional<BootpResponse> BootpHandler::getNextResponse()
+BootpHandler::~BootpHandler() = default;
+
+std::optional<BootpResponse> BootpHandler::handleRequest(std::span<const std::uint8_t> data)
 {
-    std::lock_guard lockGuard(responsesMutex);
-    if (outbound.empty())
+    BOOTP request;
+    if (!deserializeBootp(data, request))
+    {
+        Log::Warning("Failed to deserialize BOOTP message");
         return std::nullopt;
+    }
 
-    auto response = std::move(outbound.front()); // not sure if this allows the element to be, in fact, moved.
-    outbound.pop();
-
-    return response;
+    return mp->handleRequest(request);
 }

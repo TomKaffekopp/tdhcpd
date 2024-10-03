@@ -14,5 +14,4 @@ target_link_libraries(${PROJECT_NAME}
     ${ConfigurationLib}
     ${IpConverterLib}
     ${LoggerLib}
-    fmt
 )

@@ -36,9 +36,17 @@ struct BootpSocketPrivate
     std::uint16_t clientPort{ 68 };
     std::string deviceName;
 
+    BootpHandler bootpHandler;
+
     std::thread receiverThread;
     std::atomic_bool running{};
     int sockfd{};
+
+    explicit BootpSocketPrivate(std::string&& deviceName_)
+        : bootpHandler(deviceName_)
+    {
+        deviceName = std::move(deviceName_);
+    }
 
     void sendResponse(std::uint32_t target, std::span<const std::uint8_t> data) const
     {
@@ -142,12 +150,6 @@ void BootpSocketPrivate::socketThreadFn()
         timeout.tv_sec = 1;
         const auto select_ret = select(sockfd + 1, &readfds, nullptr, nullptr, &timeout);
 
-        auto response = BootpHandler::getNextResponse();
-        if (response)
-        {
-            sendResponse(response->target, response->data);
-        }
-
         if (select_ret < 1)
             continue;
 
@@ -167,7 +169,11 @@ void BootpSocketPrivate::socketThreadFn()
         dataVector.insert(dataVector.end(), data, data + ret);
         Log::Debug("Socket got data on adapter {} ({} bytes)", deviceName, dataVector.size());
 
-        BootpHandler::addRequestData(deviceName, std::move(dataVector));
+        auto response = bootpHandler.handleRequest(std::move(dataVector));
+        if (response)
+        {
+            sendResponse(response->target, response->data);
+        }
     }
 
     ::close(sockfd);
@@ -175,10 +181,9 @@ void BootpSocketPrivate::socketThreadFn()
 
 BootpSocket::BootpSocket(std::uint16_t serverPort, std::uint16_t clientPort, std::string deviceName)
 {
-    mp = std::make_unique<BootpSocketPrivate>();
+    mp = std::make_unique<BootpSocketPrivate>(std::move(deviceName));
     mp->serverPort = serverPort;
     mp->clientPort = clientPort;
-    mp->deviceName = std::move(deviceName);
     mp->running = true;
     mp->receiverThread = std::thread(&BootpSocketPrivate::socketThreadFn, mp.get());
 }
