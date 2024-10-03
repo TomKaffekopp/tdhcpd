@@ -148,6 +148,22 @@ void provideParameterList(const Network& network, const BOOTP& bootp, BOOTP& off
                 optionslog += "54/ServerIdentifier, ";
                 break;
 
+            case Option_RenewalTime:
+            {
+                optionslog += "58/RenewalTime, ";
+                auto& option = offer.options[Option_RenewalTime];
+                option = std::make_unique<IntegerBOOTPOption<std::uint32_t>>(network.getRenewalTime());
+                break;
+            }
+
+            case Option_RebindingTime:
+            {
+                optionslog += "59/RebindingTime, ";
+                auto& option = offer.options[Option_RebindingTime];
+                option = std::make_unique<IntegerBOOTPOption<std::uint32_t>>(network.getRebindingTime());
+                break;
+            }
+
             case Option_End:
                 break; // Don't care.
 
@@ -296,9 +312,6 @@ struct BootpHandlerPrivate
                 Log::Info("Sending ACK on address {} to {}",
                            convertIpAddress(address),
                            convertHardwareAddress(bootp.chaddr));
-
-                // TODO this should be done by the Network class.
-                Configuration::SavePersistentLeases(network.getAllLeases(), network.getLeaseFile());
             }
             else
             {

@@ -13,8 +13,6 @@
 
 void Network::configure(NetworkConfiguration&& config, const std::vector<Lease>& leases)
 {
-    std::lock_guard lockGuard(m_leasesMutex);
-
     m_networkSpace = config.networkSpace;
     m_networkSize = config.networkSize;
     m_routers = config.routers;
@@ -23,6 +21,8 @@ void Network::configure(NetworkConfiguration&& config, const std::vector<Lease>&
     m_dhcpLast = config.dhcpLast;
     m_dnsServers = std::move(config.dnsServers);
     m_leaseTime = config.leaseTime;
+    m_renewalTime = config.renewalTime;
+    m_rebindingTime = config.rebindingTime;
     m_leaseFile = config.leaseFile;
 
     m_reservationByHw = std::move(config.reservations);
@@ -113,6 +113,16 @@ std::uint32_t Network::getLeaseTime() const
     return m_leaseTime;
 }
 
+std::uint32_t Network::getRenewalTime() const
+{
+    return m_renewalTime;
+}
+
+std::uint32_t Network::getRebindingTime() const
+{
+    return m_rebindingTime;
+}
+
 const std::string& Network::getLeaseFile() const
 {
     return m_leaseFile;
@@ -120,8 +130,6 @@ const std::string& Network::getLeaseFile() const
 
 std::vector<Lease> Network::getAllLeases() const
 {
-    std::lock_guard lockGuard(m_leasesMutex);
-
     std::vector<Lease> leases;
     for (const auto& [hwaddr, lease] : m_leasesByHw)
         leases.emplace_back(lease);
@@ -148,8 +156,6 @@ catch (const std::out_of_range&)
 
 std::uint32_t Network::getAvailableAddress(std::uint64_t hardwareAddress, std::uint32_t preferredIpAddress)
 {
-    std::lock_guard lockGuard(m_leasesMutex);
-
     /*
      * External requests with preferredIpAddress outside the DHCP range is not allowed.
     */
@@ -229,8 +235,6 @@ std::uint32_t Network::getAvailableAddress(std::uint64_t hardwareAddress, std::u
 
 bool Network::reserveAddress(std::uint64_t hardwareAddress, std::uint32_t ipAddress)
 {
-    std::lock_guard lockGuard(m_leasesMutex);
-
     /* Check if the IP is allowed - within the network and not the first and last address. */
     if (!isIpAllowed(ipAddress))
     {
@@ -265,8 +269,6 @@ bool Network::reserveAddress(std::uint64_t hardwareAddress, std::uint32_t ipAddr
 
 void Network::releaseAddress(std::uint32_t ipAddress)
 {
-    std::lock_guard lockGuard(m_leasesMutex);
-
     removeLease(ipAddress);
 }
 
@@ -298,6 +300,10 @@ void Network::addLease(std::uint64_t hwAddress, std::uint32_t ipAddress)
     lease.hwAddress = hwAddress;
     lease.ipAddress = ipAddress;
     m_leasesByIp[ipAddress] = lease;
+
+    const auto& leaseFile = getLeaseFile();
+    if (!leaseFile.empty())
+        Configuration::SavePersistentLeases(getAllLeases(), leaseFile);
 }
 
 void Network::removeLease(std::uint64_t hwAddress)
@@ -331,4 +337,3 @@ bool Network::isIpReservedInConfig(std::uint32_t ipAddress) const
                                    return kv.second == ipAddress;
                                });
 }
-

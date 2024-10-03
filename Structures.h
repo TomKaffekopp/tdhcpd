@@ -34,6 +34,8 @@ enum BOOTPOptionKey : std::uint8_t
     Option_MessageType          = 53,
     Option_ServerIdentifier     = 54,
     Option_ParameterRequestList = 55,
+    Option_RenewalTime          = 58,
+    Option_RebindingTime        = 59,
 
     Option_End                  = 255
 };

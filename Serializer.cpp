@@ -118,6 +118,8 @@ bool deserializeBootpOptions(std::span<const std::uint8_t> buffer, BOOTP& bootp)
             /* not applicable: */
             case Option_IPLeaseTime: break;
             case Option_ServerIdentifier: break;
+            case Option_RenewalTime: break;
+            case Option_RebindingTime: break;
         }
 
         buffer = buffer.subspan(buffer.front() + 1);

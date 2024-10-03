@@ -12,6 +12,7 @@
 #include <cstring>
 
 #include <fstream>
+#include <string_view>
 
 namespace
 {
@@ -145,6 +146,22 @@ bool handleConfig_lease_time(std::string_view val, NetworkConfiguration& config)
     return config.leaseTime > 0;
 }
 
+bool handleConfig_renewal_time(std::string_view val, NetworkConfiguration& config)
+{
+    // renewal_time 43200
+
+    config.renewalTime = std::stoi(std::string(val));
+    return config.renewalTime > 0;
+}
+
+bool handleConfig_rebinding_time(std::string_view val, NetworkConfiguration& config)
+{
+    // rebinding_time 75600
+
+    config.rebindingTime = std::stoi(std::string(val));
+    return config.rebindingTime > 0;
+}
+
 bool handleConfig_lease_file(std::string_view val, NetworkConfiguration& config)
 {
     // lease_file /var/tdhcpd/eth0.lease
@@ -199,6 +216,12 @@ bool handleConfigEntry(std::string_view key, std::string_view val, NetworkConfig
 
     else if (key == "lease_time")
         return handleConfig_lease_time(val, config);
+
+    else if (key == "renewal_time")
+        return handleConfig_renewal_time(val, config);
+
+    else if (key == "rebinding_time")
+        return handleConfig_rebinding_time(val, config);
 
     else if (key == "lease_file")
         return handleConfig_lease_file(val, config);
@@ -312,6 +335,30 @@ bool Configuration::LoadFromFile(const std::string& path)
     {
         Log::Critical("Error while reading configuration!");
         return false;
+    }
+
+    /*
+     * Handle optional parameters (except "reserve")
+    */
+    for (auto& [interface, config] : Configs)
+    {
+        if (config.renewalTime == NetworkDefaults::renewalTime)
+            config.renewalTime = static_cast<std::uint32_t>(config.leaseTime * 0.5);
+
+        if (config.rebindingTime == NetworkDefaults::rebindingTime)
+            config.rebindingTime = static_cast<std::uint32_t>(config.leaseTime * 0.875);
+
+        if (config.renewalTime >= config.rebindingTime)
+        {
+            Log::Critical("Parameter renewal_time must be less than rebinding_time for interface {}", interface);
+            return false;
+        }
+
+        if (config.rebindingTime >= config.leaseTime)
+        {
+            Log::Critical("Parameter rebinding_time must be less than lease_time for interface {}", interface);
+            return false;
+        }
     }
 
     return true;

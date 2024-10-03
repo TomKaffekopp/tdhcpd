@@ -11,10 +11,9 @@
 #include "IpConverter.h"
 #include "Logger.h"
 
-#include <string_view>
+#include <string>
 #include <vector>
-#include <span>
-#include <optional>
+#include <unordered_map>
 
 /*
  * Defaults mostly meant for unit tests.
@@ -28,6 +27,8 @@ namespace NetworkDefaults
     constexpr auto first{ concatenateIpAddress(192, 168, 200, 100) };
     constexpr auto last{ concatenateIpAddress(192, 168, 200, 254) };
     constexpr auto leaseTime{ 3600 };
+    constexpr auto renewalTime{ 1800 }; // 1/2 of 3600
+    constexpr auto rebindingTime{ 3150 }; // 7/8 of 3600
 }
 
 struct NetworkConfiguration
@@ -40,6 +41,8 @@ struct NetworkConfiguration
     std::uint32_t dhcpLast{ NetworkDefaults::last };
     std::vector<std::uint32_t> dnsServers;
     std::uint32_t leaseTime{ NetworkDefaults::leaseTime };
+    std::uint32_t renewalTime{ NetworkDefaults::renewalTime };
+    std::uint32_t rebindingTime{ NetworkDefaults::rebindingTime };
     std::string leaseFile;
     std::unordered_map<std::uint64_t, std::uint32_t> reservations;
 };

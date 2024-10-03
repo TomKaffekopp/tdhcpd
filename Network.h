@@ -15,7 +15,6 @@
 #include <ctime>
 #include <vector>
 #include <unordered_map>
-#include <mutex>
 
 class Network
 {
@@ -50,6 +49,10 @@ public:
 
     std::uint32_t getLeaseTime() const;
 
+    std::uint32_t getRenewalTime() const;
+
+    std::uint32_t getRebindingTime() const;
+
     const std::string& getLeaseFile() const;
 
     std::vector<Lease> getAllLeases() const;
@@ -77,6 +80,8 @@ private:
     std::uint32_t m_dhcpLast{ NetworkDefaults::last };
     std::vector<std::uint32_t> m_dnsServers;
     std::uint32_t m_leaseTime{ NetworkDefaults::leaseTime };
+    std::uint32_t m_renewalTime{ NetworkDefaults::renewalTime };
+    std::uint32_t m_rebindingTime{ NetworkDefaults::rebindingTime };
     std::string m_leaseFile;
 
     std::unordered_map<std::uint64_t, std::uint32_t> m_reservationByHw;
@@ -84,8 +89,6 @@ private:
 
     std::unordered_map<std::uint64_t, Lease> m_leasesByHw;
     std::unordered_map<std::uint32_t, Lease> m_leasesByIp;
-
-    mutable std::mutex m_leasesMutex; // todo this might not be needed.
 
     const Lease m_invalidLease;
 
