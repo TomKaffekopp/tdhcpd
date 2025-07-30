@@ -486,3 +486,81 @@ TEST(ReservedAddressTests, PreferredFromDifferentHardwareAddress_InsideRange)
     auto ok = net.reserveAddress(1001, addr);
     EXPECT_TRUE(ok);
 }
+
+TEST(ReservedAddressTests, PreferredAsReserved_SameHardwareAddress)
+{
+    NetworkConfiguration config;
+    config.dhcpFirst = concatenateIpAddress(192, 168, 200, 100);
+    config.dhcpLast = concatenateIpAddress(192, 168, 200, 254);
+
+    // reserve .200.110 for hardware address 1000
+    config.reservations[1000] = concatenateIpAddress(192, 168, 200, 90);
+
+    Network net;
+    net.configure(std::move(config));
+
+    /*
+     * Following tests are performed twice as if the DHCP server has been running for a while.
+    */
+
+    // Hardware address 1000 requests for the reserved address (as if there was a reboot on the client side)
+    auto addr = net.getAvailableAddress(1000, concatenateIpAddress(192, 168, 200, 90));
+
+    // This should always be allowed even though the address is outside the range.
+    EXPECT_EQ(concatenateIpAddress(192, 168, 200, 90), addr);
+
+    auto ok = net.reserveAddress(1000, addr);
+    EXPECT_TRUE(ok);
+
+    /*
+     * ... And again
+    */
+
+    // Hardware address 1000 requests for the reserved address (as if there was a reboot on the client side)
+    addr = net.getAvailableAddress(1000, concatenateIpAddress(192, 168, 200, 90));
+
+    // This should always be allowed even though the address is outside the range.
+    EXPECT_EQ(concatenateIpAddress(192, 168, 200, 90), addr);
+
+    ok = net.reserveAddress(1000, addr);
+    EXPECT_TRUE(ok);
+}
+
+TEST(ReservedAddressTests, PreferredAsReserved_DifferentHardwareAddress)
+{
+    NetworkConfiguration config;
+    config.dhcpFirst = concatenateIpAddress(192, 168, 200, 100);
+    config.dhcpLast = concatenateIpAddress(192, 168, 200, 254);
+
+    // reserve .200.110 for hardware address 1000
+    config.reservations[1000] = concatenateIpAddress(192, 168, 200, 90);
+
+    Network net;
+    net.configure(std::move(config));
+
+    /*
+     * Following tests are performed twice as if the DHCP server has been running for a while.
+    */
+
+    // Hardware address 1000 requests for the reserved address (as if there was a reboot on the client side)
+    auto addr = net.getAvailableAddress(1000, concatenateIpAddress(192, 168, 200, 90));
+
+    // This should always be allowed even though the address is outside the range.
+    EXPECT_EQ(concatenateIpAddress(192, 168, 200, 90), addr);
+
+    auto ok = net.reserveAddress(1000, addr);
+    EXPECT_TRUE(ok);
+
+    /*
+     * ... And again, but this time from a different hardware address.
+    */
+
+    // Hardware address 1000 requests for the reserved address (as if there was a reboot on the client side)
+    addr = net.getAvailableAddress(1001, concatenateIpAddress(192, 168, 200, 90));
+
+    // This should always never be allowed.
+    EXPECT_NE(concatenateIpAddress(192, 168, 200, 90), addr);
+
+    ok = net.reserveAddress(1001, addr);
+    EXPECT_TRUE(ok);
+}

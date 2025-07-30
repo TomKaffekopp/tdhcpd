@@ -213,12 +213,18 @@ std::uint32_t Network::getAvailableAddress(std::uint64_t hardwareAddress, std::u
         }
     }
 
-    /* Check if the preferred IP address is not in use and use that */
+    /*
+     * Check if the preferred IP address is not in use and use that.
+     * Or, if the preferred IP is reserved for this hardware address: Always allow that.
+     */
     if (preferredIpAddress != 0)
     {
         const auto& lease = getLease(preferredIpAddress);
-        if (!isLeaseEntryValid(lease))
+        if (!isLeaseEntryValid(lease)
+            || (m_reservationByIp.contains(preferredIpAddress) && m_reservationByIp[preferredIpAddress] == hardwareAddress))
+        {
             return preferredIpAddress;
+        }
     }
 
     /* Find the first available address in the network */
